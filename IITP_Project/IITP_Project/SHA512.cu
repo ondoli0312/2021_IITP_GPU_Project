@@ -19,3 +19,5 @@ __device__ bool KMU_SHA256_Process(uint_32 word[16],)
 {
 
 }
+
+__device__ PBKDF2();
