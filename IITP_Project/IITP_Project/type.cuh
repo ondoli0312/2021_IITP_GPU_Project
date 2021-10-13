@@ -8,9 +8,9 @@
 //CU FILE HEADER
 
 //TYPE HEADER
-typedef unsigned char uint_8;
-typedef unsigned int uint_32;
-typedef unsigned long long uint_64;
+typedef unsigned char uint8_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
 
 //BOOL FUNCTION RETURN
 #define SUCCESS 1
