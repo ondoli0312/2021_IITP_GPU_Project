@@ -79,6 +79,7 @@
   <ItemGroup>
     <CudaCompile Include="AES.cu" />
     <CudaCompile Include="kernel.cu" />
+    <CudaCompile Include="PBKDF2.cu" />
     <CudaCompile Include="SHA512.cu" />
   </ItemGroup>
   <ItemGroup>

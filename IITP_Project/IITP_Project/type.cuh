@@ -16,4 +16,6 @@ typedef unsigned long long uint64_t;
 #define SUCCESS 1
 #define FAILURE 0
 
-
+//FULL Cracking
+#define BLOCKFULL 65536
+#define THREADFULL 1024
