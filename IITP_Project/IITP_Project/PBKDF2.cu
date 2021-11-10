@@ -1,3 +1,4 @@
+#define CUDA_API_PER_THREAD_DEFAULT_STEAM
 #include "type.cuh"
 #include "SHA512.cuh"
 
@@ -301,7 +302,7 @@ __device__ void KMU_PRE_HMAC_SHA512v2(uint64_t pt, uint64_t ptLen, uint64_t* OPA
 	KMU_PBKDF_SHA_BLOCKv2(OPAD, OPAD_out);
 }
 
-__device__ void KMU_PKBDF2_Core_v2(uint64_t pt, uint64_t ptLen, uint64_t iteration, uint8_t* salt, uint64_t saLen, uint64_t DK, uint8_t* cracking) {
+__device__ void KMU_PKBDF2_Core_v2(uint64_t pt, uint64_t ptLen, uint64_t iteration, uint8_t* salt, uint64_t saLen, uint64_t* DK, uint8_t* cracking) {
 	uint64_t OPAD_out[16];
 	uint64_t IPAD_out[16];
 	uint64_t dk1[8];
@@ -335,7 +336,7 @@ __device__ void KMU_PKBDF2_Core_v2(uint64_t pt, uint64_t ptLen, uint64_t iterati
 			out[j] ^= dk2[j];
 		}
 	}
-	if (out[0] == TT[0]) {
+	if (out[0] == DK[0]) {
 		cracking[0] = 1;
 	}
 }
@@ -375,28 +376,76 @@ __global__ void KMU_PBKDF2v3(uint64_t iteration, uint8_t* salt, uint64_t saLen, 
 	pt1 = threadIdx.x;
 	pt = pt + (pt1 << 48);
 
-	KMU_PKBDF2_Core_v2(pt, 1, iteration, salt, saLen, pt1, cracking);
+	KMU_PKBDF2_Core_v2(pt, 1, iteration, salt, saLen, Target, cracking);
 	if (cracking[0] == 1) {
-		Target[0] = 0x1f;
+		printf("%016llx ", pt);
+	}
+
+}
+
+__global__ void KMU_PBKDF2v4(uint64_t iteration, uint8_t* salt, uint64_t saLen, uint64_t* Target)
+{
+	//Password Word Setting
+	uint64_t pt = 0;
+	uint64_t pt1 = 0;
+	//uint64_t tt = Target[0];
+	uint8_t cracking[1];
+	cracking[0] = 0;
+	uint64_t flag = (blockDim.x * blockIdx.x) + threadIdx.x;
+
+	pt = (flag % 128) << 56;
+	pt = pt | (((flag >> 7) & 0x7F) << 48);
+	pt = pt | (((flag / 16384) & 0x7F) << 40);
+	for (int j = 0; j < 2; j++) {
+		pt = pt | ((j & 0x7F) << 32);
+		KMU_PKBDF2_Core_v2(pt, 1, iteration, salt, saLen, Target, cracking);
+	}
+	if (cracking[0] == 1) {
+		printf("%016llx ", pt);
 	}
 
 }
 
 
+__global__ void KMU_PBKDF2v5(uint64_t iteration, uint8_t* salt, uint64_t saLen, uint64_t* Target, int stream)
+{
+	//Password Word Setting
+	uint64_t pt = 0;
+	uint64_t pt1 = 0;
+	//uint64_t tt = Target[0];
+	uint8_t cracking[1];
+	cracking[0] = 0;
+	uint64_t flag = (blockDim.x * blockIdx.x) + threadIdx.x;
+	pt = (flag % 128) << 56;
+	pt = pt | (((flag >> 7) & 0x7F) << 48);
+	pt = pt | (((flag / 16384) & 0x7F) << 40);
+	pt = pt | ((stream & 0x7F) << 32);
+	KMU_PKBDF2_Core_v2(pt, 1, iteration, salt, saLen, Target, cracking);
+	if (cracking[0] == 1) {
+		printf("%016llx ", pt);
+	}
+}
+
+__global__ void Core()
+{
+
+}
+
 int main()
 {
 	uint8_t salt[4];
 	uint64_t Target[1];
-	
+	cudaStream_t stream[2];
+
 	cudaEvent_t start, stop;
 	cudaError_t err;
 	float elapsed_time_ms = 0.0f;
-
+	
 	salt[0] = 0x73;
 	salt[1] = 0x61;
 	salt[2] = 0x6c;
 	salt[3] = 0x74;
-	Target[0] = 0x2527B51365102B38;
+	Target[0] = 0x9D536145420D4242;
 	TT[0] = Target[0];
 	uint8_t* cuda_salt = NULL;
 	uint64_t* cuda_Target = NULL;
@@ -410,12 +459,53 @@ int main()
 	cudaEventCreate(&stop);
 	cudaEventRecord(start, 0);
 	for (int i = 0; i < 1; i++) {
-		KMU_PBKDF2v3 << <128, 128 >> > (129937, cuda_salt, 4, cuda_Target);
+		//KMU_PBKDF2v4 << <4096, 512 >> > (129937, cuda_salt, 4, cuda_Target);
 	}cudaEventRecord(stop, 0);
 	cudaDeviceSynchronize();
 	cudaEventSynchronize(start);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsed_time_ms, start, stop);
-	printf("Performance : %4.2f/s\n", elapsed_time_ms);
+	printf("Performance : %4.2f/s\n", elapsed_time_ms/1000);
+
+	uint8_t* Salt = NULL;
+	uint64_t* TTarget = NULL;
+	uint8_t* cuda_salt_s0 = NULL;
+	uint8_t* cuda_salt_s1 = NULL;
+	uint64_t* cuda_Target0 = NULL;
+	uint64_t* cuda_Target1 = NULL;
+
+	cudaMalloc((void**)&cuda_salt_s0, 4);
+	cudaMalloc((void**)&cuda_salt_s1, 4);
+	cudaMalloc((void**)&cuda_Target0, 8);
+	cudaMalloc((void**)&cuda_Target1, 8);
+	cudaMallocHost((void**)&Salt, 4);
+	cudaMallocHost((void**)&TTarget, 8);
+
+	cudaStreamCreate(&stream[0]);
+	cudaStreamCreate(&stream[1]);
+
+	Salt[0] = 0x73;
+	Salt[1] = 0x61;
+	Salt[2] = 0x6c;
+	Salt[3] = 0x74;
+	TTarget[0] = 0x9D536145420D4242;
+
+
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+	cudaEventRecord(start, 0);
+
+	cudaMemcpyAsync(cuda_salt_s0, Salt, 4, cudaMemcpyHostToDevice, stream[0]);
+	cudaMemcpyAsync(cuda_Target0, TTarget, 8, cudaMemcpyHostToDevice, stream[0]);
+	KMU_PBKDF2v5 << <4096, 512, 0, stream[0] >> > (129937, cuda_salt, 4, cuda_Target, 0);
+	cudaMemcpyAsync(cuda_salt_s1, Salt, 4, cudaMemcpyHostToDevice, stream[1]);
+	cudaMemcpyAsync(cuda_Target1, TTarget, 8, cudaMemcpyHostToDevice, stream[1]);
+	KMU_PBKDF2v5 << <4096, 512, 0, stream[1] >> > (129937, cuda_salt, 4, cuda_Target, 1);
+	cudaEventRecord(stop, 0);
+	cudaDeviceSynchronize();
+	cudaEventSynchronize(start);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsed_time_ms, start, stop);
+	printf("Performance : %4.2f/s\n", elapsed_time_ms / 1000);
 
 }
